@@ -1,0 +1,251 @@
+import winston from 'winston';
+import path from 'path';
+
+// Niveaux de log personnalisés
+const levels = {
+  error: 0,
+  warn: 1,
+  info: 2,
+  debug: 3,
+};
+
+const colors = {
+  error: 'red',
+  warn: 'yellow',
+  info: 'green',
+  debug: 'blue',
+};
+
+winston.addColors(colors);
+
+// Format pour les logs en développement
+const developmentFormat = winston.format.combine(
+  winston.format.timestamp({ format: 'YYYY-MM-DD HH:mm:ss' }),
+  winston.format.errors({ stack: true }),
+  winston.format.colorize({ all: true }),
+  winston.format.printf(({ timestamp, level, message, ...meta }) => {
+    let metaString = '';
+    if (Object.keys(meta).length > 0) {
+      metaString = `\n${JSON.stringify(meta, null, 2)}`;
+    }
+    return `[${timestamp}] ${level}: ${message}${metaString}`;
+  })
+);
+
+// Format pour les logs en production
+const productionFormat = winston.format.combine(
+  winston.format.timestamp({ format: 'YYYY-MM-DD HH:mm:ss.SSS' }),
+  winston.format.errors({ stack: true }),
+  winston.format.json()
+);
+
+// Configuration des transports
+const transports: winston.transport[] = [];
+
+// Console transport (toujours actif)
+transports.push(
+  new winston.transports.Console({
+    level: process.env.LOG_LEVEL || 'info',
+    format: process.env.NODE_ENV === 'production' ? productionFormat : developmentFormat,
+  })
+);
+
+// File transports en production
+if (process.env.NODE_ENV === 'production') {
+  // Logs généraux
+  transports.push(
+    new winston.transports.File({
+      filename: path.join(process.cwd(), 'logs', 'app.log'),
+      level: 'info',
+      format: productionFormat,
+      maxsize: 50 * 1024 * 1024, // 50MB
+      maxFiles: 5,
+      tailable: true,
+    })
+  );
+
+  // Logs d'erreur séparés
+  transports.push(
+    new winston.transports.File({
+      filename: path.join(process.cwd(), 'logs', 'error.log'),
+      level: 'error',
+      format: productionFormat,
+      maxsize: 50 * 1024 * 1024, // 50MB
+      maxFiles: 3,
+      tailable: true,
+    })
+  );
+}
+
+// Création du logger principal
+export const logger = winston.createLogger({
+  level: process.env.LOG_LEVEL || 'info',
+  levels,
+  format: winston.format.combine(
+    winston.format.timestamp(),
+    winston.format.errors({ stack: true })
+  ),
+  transports,
+  exitOnError: false,
+});
+
+// Logger spécialisé pour les métriques de performance
+export const performanceLogger = winston.createLogger({
+  level: 'info',
+  format: winston.format.combine(
+    winston.format.timestamp(),
+    winston.format.json()
+  ),
+  transports: [
+    new winston.transports.File({
+      filename: path.join(process.cwd(), 'logs', 'performance.log'),
+      maxsize: 10 * 1024 * 1024, // 10MB
+      maxFiles: 3,
+    })
+  ],
+});
+
+// Logger pour les transactions blockchain
+export const blockchainLogger = winston.createLogger({
+  level: 'info',
+  format: winston.format.combine(
+    winston.format.timestamp(),
+    winston.format.json()
+  ),
+  transports: [
+    new winston.transports.File({
+      filename: path.join(process.cwd(), 'logs', 'blockchain.log'),
+      maxsize: 10 * 1024 * 1024, // 10MB
+      maxFiles: 5,
+    })
+  ],
+});
+
+// Logger pour la sécurité
+export const securityLogger = winston.createLogger({
+  level: 'info',
+  format: winston.format.combine(
+    winston.format.timestamp(),
+    winston.format.json()
+  ),
+  transports: [
+    new winston.transports.File({
+      filename: path.join(process.cwd(), 'logs', 'security.log'),
+      maxsize: 10 * 1024 * 1024, // 10MB
+      maxFiles: 10,
+    })
+  ],
+});
+
+// Fonctions utilitaires pour le logging contextuel
+export class LogContext {
+  private context: Record<string, any> = {};
+
+  constructor(initialContext: Record<string, any> = {}) {
+    this.context = { ...initialContext };
+  }
+
+  addContext(key: string, value: any): LogContext {
+    this.context[key] = value;
+    return this;
+  }
+
+  info(message: string, meta?: Record<string, any>): void {
+    logger.info(message, { ...this.context, ...meta });
+  }
+
+  error(message: string, error?: Error, meta?: Record<string, any>): void {
+    logger.error(message, { 
+      ...this.context, 
+      ...(error ? { error: error.message, stack: error.stack } : {}),
+      ...meta 
+    });
+  }
+
+  warn(message: string, meta?: Record<string, any>): void {
+    logger.warn(message, { ...this.context, ...meta });
+  }
+
+  debug(message: string, meta?: Record<string, any>): void {
+    logger.debug(message, { ...this.context, ...meta });
+  }
+}
+
+// Middleware pour mesurer les performances des requêtes
+export const performanceMiddleware = (req: any, res: any, next: any) => {
+  const startTime = Date.now();
+  const originalSend = res.send;
+
+  res.send = function(body: any) {
+    const endTime = Date.now();
+    const duration = endTime - startTime;
+    
+    performanceLogger.info('Request completed', {
+      method: req.method,
+      url: req.originalUrl,
+      statusCode: res.statusCode,
+      duration,
+      userAgent: req.get('User-Agent'),
+      ip: req.ip,
+      timestamp: new Date().toISOString()
+    });
+
+    return originalSend.call(this, body);
+  };
+
+  next();
+};
+
+// Fonction pour logger les transactions blockchain
+export const logBlockchainTransaction = (data: {
+  txHash: string;
+  type: string;
+  status: string;
+  gasUsed?: string;
+  gasPrice?: string;
+  blockNumber?: string;
+  error?: string;
+}) => {
+  blockchainLogger.info('Blockchain transaction', {
+    ...data,
+    timestamp: new Date().toISOString()
+  });
+};
+
+// Fonction pour logger les événements de sécurité
+export const logSecurityEvent = (data: {
+  type: 'AUTHENTICATION' | 'AUTHORIZATION' | 'RATE_LIMIT' | 'SUSPICIOUS_ACTIVITY';
+  severity: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
+  message: string;
+  ip?: string;
+  userAgent?: string;
+  userId?: string;
+  details?: Record<string, any>;
+}) => {
+  securityLogger.info('Security event', {
+    ...data,
+    timestamp: new Date().toISOString()
+  });
+};
+
+// Gestionnaire d'erreurs non capturées
+if (process.env.NODE_ENV === 'production') {
+  process.on('uncaughtException', (error) => {
+    logger.error('Uncaught Exception', { error: error.message, stack: error.stack });
+    // Ne pas quitter immédiatement en production pour éviter les downtime
+    setTimeout(() => process.exit(1), 1000);
+  });
+
+  process.on('unhandledRejection', (reason, promise) => {
+    logger.error('Unhandled Rejection', { reason, promise });
+  });
+}
+
+// Créer les dossiers de logs si ils n'existent pas
+import fs from 'fs';
+const logsDir = path.join(process.cwd(), 'logs');
+if (!fs.existsSync(logsDir)) {
+  fs.mkdirSync(logsDir, { recursive: true });
+}
+
+export default logger;

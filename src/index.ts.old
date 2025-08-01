@@ -1,0 +1,245 @@
+import express from 'express';
+import { createServer } from 'http';
+import { Server } from 'socket.io';
+import cors from 'cors';
+import helmet from 'helmet';
+import compression from 'compression';
+import rateLimit from 'express-rate-limit';
+import dotenv from 'dotenv';
+
+import { logger } from './utils/logger';
+import { PrismaService } from './services/prisma.service';
+import { RedisService } from './services/redis.service';
+import { BlockchainService } from './services/blockchain.service';
+import { WebSocketService } from './services/websocket.service';
+
+// Routes
+import stakingRoutes from './routes/staking.routes';
+import institutionRoutes from './routes/institution.routes';
+import metricsRoutes from './routes/metrics.routes';
+import healthRoutes from './routes/health.routes';
+
+// Middleware
+import { errorHandler } from './middleware/error.middleware';
+import { authMiddleware } from './middleware/auth.middleware';
+
+// Jobs
+import { startBackgroundJobs } from './jobs';
+
+dotenv.config();
+
+const app = express();
+const server = createServer(app);
+const io = new Server(server, {
+  cors: {
+    origin: process.env.FRONTEND_URL || "http://localhost:3000",
+    methods: ["GET", "POST"],
+    credentials: true
+  },
+  transports: ['websocket', 'polling']
+});
+
+const PORT = process.env.PORT || 3001;
+
+// Services globaux
+let prismaService: PrismaService;
+let redisService: RedisService;
+let blockchainService: BlockchainService;
+let webSocketService: WebSocketService;
+
+// Configuration des middlewares de sécurité
+app.use(helmet({
+  contentSecurityPolicy: {
+    directives: {
+      defaultSrc: ["'self'"],
+      styleSrc: ["'self'", "'unsafe-inline'"],
+      scriptSrc: ["'self'"],
+      imgSrc: ["'self'", "data:", "https:"],
+    },
+  },
+}));
+
+app.use(compression());
+app.use(cors({
+  origin: process.env.FRONTEND_URL || "http://localhost:3000",
+  credentials: true
+}));
+
+// Rate limiting - limite globale
+const globalLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 1000, // 1000 requêtes par IP
+  message: {
+    error: 'Trop de requêtes depuis cette IP, réessayez plus tard.'
+  },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+// Rate limiting spécifique pour les API critiques
+const apiLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 100, // 100 requêtes par IP pour les APIs
+  message: {
+    error: 'Limite d\'API atteinte, réessayez plus tard.'
+  }
+});
+
+app.use(globalLimiter);
+app.use(express.json({ limit: '10mb' }));
+app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+
+// Logging des requêtes
+app.use((req, res, next) => {
+  logger.info(`${req.method} ${req.path}`, {
+    ip: req.ip,
+    userAgent: req.get('User-Agent'),
+    timestamp: new Date().toISOString()
+  });
+  next();
+});
+
+// Routes publiques (health check)
+app.use('/api/health', healthRoutes);
+
+// Routes avec authentification
+app.use('/api/staking', apiLimiter, authMiddleware, stakingRoutes);
+app.use('/api/institutions', apiLimiter, authMiddleware, institutionRoutes);
+app.use('/api/metrics', apiLimiter, metricsRoutes);
+
+// Route de test pour vérifier le bon fonctionnement
+app.get('/api/test', (req, res) => {
+  res.json({
+    message: 'Enterprise Staking API is running',
+    timestamp: new Date().toISOString(),
+    version: '1.0.0'
+  });
+});
+
+// Gestion des erreurs
+app.use(errorHandler);
+
+// Gestion des routes non trouvées
+app.use('*', (req, res) => {
+  res.status(404).json({
+    error: 'Route non trouvée',
+    path: req.originalUrl
+  });
+});
+
+// Initialisation des services
+async function initializeServices() {
+  try {
+    logger.info('🚀 Initialisation des services...');
+
+    // Initialisation Prisma
+    prismaService = new PrismaService();
+    await prismaService.connect();
+    logger.info('✅ Prisma connecté');
+
+    // Initialisation Redis
+    redisService = new RedisService();
+    await redisService.connect();
+    logger.info('✅ Redis connecté');
+
+    // Initialisation du service blockchain
+    blockchainService = new BlockchainService(
+      process.env.RPC_URL || 'https://zkevm-rpc.com',
+      process.env.CONTRACT_ADDRESS!,
+      redisService
+    );
+    await blockchainService.initialize();
+    logger.info('✅ Service blockchain initialisé');
+
+    // Initialisation WebSocket
+    webSocketService = new WebSocketService(io, prismaService, redisService, blockchainService);
+    webSocketService.initialize();
+    logger.info('✅ WebSocket service initialisé');
+
+    // Rendre les services disponibles globalement
+    app.locals.prisma = prismaService;
+    app.locals.redis = redisService;
+    app.locals.blockchain = blockchainService;
+    app.locals.websocket = webSocketService;
+
+  } catch (error) {
+    logger.error('❌ Erreur lors de l\'initialisation des services:', error);
+    process.exit(1);
+  }
+}
+
+// Gestion propre de l'arrêt
+async function gracefulShutdown() {
+  logger.info('🔄 Arrêt en cours...');
+  
+  // Arrêter le serveur HTTP
+  server.close(() => {
+    logger.info('✅ Serveur HTTP fermé');
+  });
+
+  // Fermer les connexions aux services
+  try {
+    if (webSocketService) {
+      webSocketService.disconnect();
+    }
+    if (blockchainService) {
+      await blockchainService.disconnect();
+    }
+    if (redisService) {
+      await redisService.disconnect();
+    }
+    if (prismaService) {
+      await prismaService.disconnect();
+    }
+    logger.info('✅ Services fermés proprement');
+  } catch (error) {
+    logger.error('❌ Erreur lors de la fermeture:', error);
+  }
+
+  process.exit(0);
+}
+
+// Gestion des signaux système
+process.on('SIGTERM', gracefulShutdown);
+process.on('SIGINT', gracefulShutdown);
+
+// Gestion des erreurs non capturées
+process.on('uncaughtException', (error) => {
+  logger.error('❌ Exception non capturée:', error);
+  gracefulShutdown();
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+  logger.error('❌ Promesse rejetée non gérée:', { reason, promise });
+  gracefulShutdown();
+});
+
+// Démarrage du serveur
+async function startServer() {
+  try {
+    await initializeServices();
+    
+    // Démarrer les tâches de fond
+    startBackgroundJobs(prismaService, redisService, blockchainService);
+    
+    server.listen(PORT, () => {
+      logger.info(`🚀 Serveur démarré sur le port ${PORT}`);
+      logger.info(`📊 Dashboard disponible sur: http://localhost:${PORT}/api/health`);
+      logger.info(`🔗 WebSocket sur: ws://localhost:${PORT}`);
+      
+      // Affichage de l'environnement
+      logger.info(`🌍 Environnement: ${process.env.NODE_ENV || 'development'}`);
+      logger.info(`⛓️  RPC URL: ${process.env.RPC_URL || 'Non configuré'}`);
+      logger.info(`💾 Base de données: ${process.env.DATABASE_URL ? 'Configurée' : 'Non configurée'}`);
+      logger.info(`🔴 Redis: ${process.env.REDIS_URL || 'redis://localhost:6379'}`);
+    });
+  } catch (error) {
+    logger.error('❌ Erreur lors du démarrage du serveur:', error);
+    process.exit(1);
+  }
+}
+
+// Lancement
+startServer();
+
+export { app, server, io };

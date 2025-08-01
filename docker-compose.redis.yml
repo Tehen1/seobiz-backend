@@ -1,0 +1,305 @@
+version: '3.8'
+
+# ===================================================================
+# DOCKER COMPOSE - REDIS INFRASTRUCTURE
+# Setup complet Redis + Sentinel + Monitoring pour SEO SEA Vision Pro
+# ===================================================================
+
+services:
+  # ============ REDIS MASTER ============
+  redis-master:
+    image: redis:7.2-alpine
+    container_name: seo-redis-master
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - ./redis/redis-master.conf:/usr/local/etc/redis/redis.conf:ro
+      - redis-master-data:/data
+      - ./logs/redis:/var/log/redis
+    command: redis-server /usr/local/etc/redis/redis.conf
+    environment:
+      - REDIS_REPLICATION_MODE=master
+    networks:
+      - redis-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+  # ============ REDIS REPLICA 1 ============
+  redis-replica-1:
+    image: redis:7.2-alpine
+    container_name: seo-redis-replica-1
+    restart: unless-stopped
+    ports:
+      - "6380:6379"
+    volumes:
+      - ./redis/redis-replica.conf:/usr/local/etc/redis/redis.conf:ro
+      - redis-replica-1-data:/data
+      - ./logs/redis:/var/log/redis
+    command: redis-server /usr/local/etc/redis/redis.conf --replicaof redis-master 6379
+    depends_on:
+      - redis-master
+    networks:
+      - redis-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # ============ REDIS REPLICA 2 ============
+  redis-replica-2:
+    image: redis:7.2-alpine
+    container_name: seo-redis-replica-2
+    restart: unless-stopped
+    ports:
+      - "6381:6379"
+    volumes:
+      - ./redis/redis-replica.conf:/usr/local/etc/redis/redis.conf:ro
+      - redis-replica-2-data:/data
+      - ./logs/redis:/var/log/redis
+    command: redis-server /usr/local/etc/redis/redis.conf --replicaof redis-master 6379
+    depends_on:
+      - redis-master
+    networks:
+      - redis-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # ============ REDIS SENTINEL 1 ============
+  redis-sentinel-1:
+    image: redis:7.2-alpine
+    container_name: seo-redis-sentinel-1
+    restart: unless-stopped
+    ports:
+      - "26379:26379"
+    volumes:
+      - ./redis/redis-sentinel.conf:/usr/local/etc/redis/sentinel.conf:ro
+      - ./logs/redis:/var/log/redis
+    command: redis-sentinel /usr/local/etc/redis/sentinel.conf
+    depends_on:
+      - redis-master
+      - redis-replica-1
+      - redis-replica-2
+    networks:
+      - redis-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "-p", "26379", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # ============ REDIS SENTINEL 2 ============
+  redis-sentinel-2:
+    image: redis:7.2-alpine
+    container_name: seo-redis-sentinel-2
+    restart: unless-stopped
+    ports:
+      - "26380:26379"
+    volumes:
+      - ./redis/redis-sentinel.conf:/usr/local/etc/redis/sentinel.conf:ro
+      - ./logs/redis:/var/log/redis
+    command: redis-sentinel /usr/local/etc/redis/sentinel.conf
+    depends_on:
+      - redis-master
+      - redis-replica-1
+      - redis-replica-2
+    networks:
+      - redis-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "-p", "26379", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # ============ REDIS SENTINEL 3 ============
+  redis-sentinel-3:
+    image: redis:7.2-alpine
+    container_name: seo-redis-sentinel-3
+    restart: unless-stopped
+    ports:
+      - "26381:26379"
+    volumes:
+      - ./redis/redis-sentinel.conf:/usr/local/etc/redis/redis.conf:ro
+      - ./logs/redis:/var/log/redis
+    command: redis-sentinel /usr/local/etc/redis/sentinel.conf
+    depends_on:
+      - redis-master
+      - redis-replica-1
+      - redis-replica-2
+    networks:
+      - redis-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "-p", "26379", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # ============ REDIS CLUSTER (Optionnel pour sharding) ============
+  redis-cluster-1:
+    image: redis:7.2-alpine
+    container_name: seo-redis-cluster-1
+    restart: unless-stopped
+    ports:
+      - "7000:7000"
+      - "17000:17000"
+    volumes:
+      - ./redis/redis-cluster.conf:/usr/local/etc/redis/redis.conf:ro
+      - redis-cluster-1-data:/data
+    command: redis-server /usr/local/etc/redis/redis.conf --port 7000 --cluster-announce-ip redis-cluster-1
+    networks:
+      - redis-network
+    profiles:
+      - cluster
+
+  redis-cluster-2:
+    image: redis:7.2-alpine
+    container_name: seo-redis-cluster-2
+    restart: unless-stopped
+    ports:
+      - "7001:7001"
+      - "17001:17001"
+    volumes:
+      - ./redis/redis-cluster.conf:/usr/local/etc/redis/redis.conf:ro
+      - redis-cluster-2-data:/data
+    command: redis-server /usr/local/etc/redis/redis.conf --port 7001 --cluster-announce-ip redis-cluster-2
+    networks:
+      - redis-network
+    profiles:
+      - cluster
+
+  redis-cluster-3:
+    image: redis:7.2-alpine
+    container_name: seo-redis-cluster-3
+    restart: unless-stopped
+    ports:
+      - "7002:7002"
+      - "17002:17002"
+    volumes:
+      - ./redis/redis-cluster.conf:/usr/local/etc/redis/redis.conf:ro
+      - redis-cluster-3-data:/data
+    command: redis-server /usr/local/etc/redis/redis.conf --port 7002 --cluster-announce-ip redis-cluster-3
+    networks:
+      - redis-network
+    profiles:
+      - cluster
+
+  # ============ REDIS COMMANDER (Interface Web) ============
+  redis-commander:
+    image: rediscommander/redis-commander:latest
+    container_name: seo-redis-commander
+    restart: unless-stopped
+    ports:
+      - "8081:8081"
+    environment:
+      - REDIS_HOSTS=master:redis-master:6379,replica1:redis-replica-1:6379,replica2:redis-replica-2:6379
+      - HTTP_USER=admin
+      - HTTP_PASSWORD=secure-password-123
+    depends_on:
+      - redis-master
+    networks:
+      - redis-network
+    profiles:
+      - monitoring
+
+  # ============ REDIS EXPORTER (Prometheus) ============
+  redis-exporter:
+    image: oliver006/redis_exporter:latest
+    container_name: seo-redis-exporter
+    restart: unless-stopped
+    ports:
+      - "9121:9121"
+    environment:
+      - REDIS_ADDR=redis://redis-master:6379
+      - REDIS_PASSWORD=your-redis-password
+    depends_on:
+      - redis-master
+    networks:
+      - redis-network
+    profiles:
+      - monitoring
+
+  # ============ PROMETHEUS (Métriques) ============
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: seo-prometheus
+    restart: unless-stopped
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--storage.tsdb.retention.time=200h'
+      - '--web.enable-lifecycle'
+    networks:
+      - redis-network
+    profiles:
+      - monitoring
+
+  # ============ GRAFANA (Visualisation) ============
+  grafana:
+    image: grafana/grafana:latest
+    container_name: seo-grafana
+    restart: unless-stopped
+    ports:
+      - "3001:3000"
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin123
+      - GF_USERS_ALLOW_SIGN_UP=false
+    depends_on:
+      - prometheus
+    networks:
+      - redis-network
+    profiles:
+      - monitoring
+
+# ============ VOLUMES ============
+volumes:
+  redis-master-data:
+    driver: local
+  redis-replica-1-data:
+    driver: local
+  redis-replica-2-data:
+    driver: local
+  redis-cluster-1-data:
+    driver: local
+  redis-cluster-2-data:
+    driver: local
+  redis-cluster-3-data:
+    driver: local
+  prometheus-data:
+    driver: local
+  grafana-data:
+    driver: local
+
+# ============ NETWORKS ============
+networks:
+  redis-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
+
+# ============ HEALTHCHECKS ADDITIONNELS ============
+x-redis-healthcheck: &redis-healthcheck
+  test: ["CMD", "redis-cli", "ping"]
+  interval: 30s
+  timeout: 10s
+  retries: 3
+  start_period: 30s

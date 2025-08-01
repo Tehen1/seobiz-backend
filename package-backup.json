@@ -1,0 +1,64 @@
+{
+  "name": "seo-sea-vision-backend",
+  "version": "1.0.0",
+  "description": "Backend API for SEO SEA Vision Pro - Content Brief Generator",
+  "author": "DevTehen",
+  "private": true,
+  "license": "MIT",
+  "main": "dist/main.js",
+  "scripts": {
+    "build": "nest build",
+    "format": "prettier --write \"src/**/*.ts\" \"test/**/*.ts\"",
+    "start": "nest start",
+    "start:dev": "nest start --watch",
+    "start:debug": "nest start --debug --watch",
+    "start:prod": "node dist/main",
+    "lint": "eslint \"{src,apps,libs,test}/**/*.ts\" --fix",
+    "test": "jest",
+    "test:watch": "jest --watch",
+    "test:cov": "jest --coverage",
+    "redis:start": "redis-server",
+    "redis:cli": "redis-cli",
+    "encrypt:key": "node ../scripts/encrypt-api-key.js",
+    "health:check": "curl http://localhost:3000/health"
+  },
+  "dependencies": {
+    "@nestjs/common": "^10.0.0",
+    "@nestjs/core": "^10.0.0",
+    "@nestjs/platform-express": "^10.0.0",
+    "@nestjs/config": "^3.0.0",
+    "@nestjs/axios": "^3.0.0",
+    "ioredis": "^5.3.0",
+    "axios": "^1.6.0",
+    "rxjs": "^7.8.1",
+    "reflect-metadata": "^0.1.13",
+    "class-validator": "^0.14.0",
+    "class-transformer": "^0.5.1"
+  },
+  "devDependencies": {
+    "@nestjs/cli": "^10.0.0",
+    "@nestjs/testing": "^10.0.0",
+    "@types/node": "^20.0.0",
+    "typescript": "^5.1.0",
+    "ts-node": "^10.9.1",
+    "jest": "^29.5.0",
+    "@types/jest": "^29.5.0",
+    "ts-jest": "^29.1.0",
+    "prettier": "^3.0.0"
+  },
+  "jest": {
+    "moduleFileExtensions": ["js", "json", "ts"],
+    "rootDir": "src",
+    "testRegex": ".*\\.spec\\.ts$",
+    "transform": {
+      "^.+\\.(t|j)s$": "ts-jest"
+    },
+    "collectCoverageFrom": ["**/*.(t|j)s"],
+    "coverageDirectory": "../coverage",
+    "testEnvironment": "node"
+  },
+  "engines": {
+    "node": ">=18.0.0",
+    "npm": ">=8.0.0"
+  }
+}

@@ -1,0 +1,166 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// Institution financière enregistrée
+model Institution {
+  id          String   @id @default(cuid())
+  address     String   @unique // Adresse Ethereum
+  name        String
+  institutionId String @unique // ID unique métier
+  riskScore   Int      // Score de risque (0-10000 basis points)
+  verified    Boolean  @default(false)
+  totalStaked Decimal  @default(0) @db.Decimal(78, 18)
+  totalRewards Decimal @default(0) @db.Decimal(78, 18)
+  
+  // Métadonnées
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  // Relations
+  stakes      Stake[]
+  transactions Transaction[]
+  
+  @@map("institutions")
+}
+
+// Stake individuel
+model Stake {
+  id          String   @id @default(cuid())
+  stakeId     Int      // ID du stake dans le smart contract
+  amount      Decimal  @db.Decimal(78, 18)
+  lockPeriod  Int      // Période de verrouillage en secondes
+  timestamp   DateTime
+  isActive    Boolean  @default(true)
+  rewards     Decimal  @default(0) @db.Decimal(78, 18)
+  
+  // Métadonnées
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  // Relations
+  institution   Institution @relation(fields: [institutionId], references: [id])
+  institutionId String
+  transactions  Transaction[]
+  
+  // Index pour les requêtes fréquentes
+  @@index([institutionId, isActive])
+  @@index([timestamp])
+  @@map("stakes")
+}
+
+// Transaction blockchain
+model Transaction {
+  id          String      @id @default(cuid())
+  txHash      String      @unique
+  type        TransactionType
+  amount      Decimal     @db.Decimal(78, 18)
+  gasUsed     BigInt?
+  gasPrice    BigInt?
+  blockNumber BigInt?
+  status      TransactionStatus @default(PENDING)
+  
+  // Métadonnées
+  timestamp   DateTime    @default(now())
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+  
+  // Relations
+  institution   Institution? @relation(fields: [institutionId], references: [id])
+  institutionId String?
+  stake         Stake?       @relation(fields: [stakeId], references: [id])
+  stakeId       String?
+  
+  @@index([txHash])
+  @@index([type, status])
+  @@index([timestamp])
+  @@map("transactions")
+}
+
+// Types de transaction
+enum TransactionType {
+  STAKE_CREATE
+  STAKE_WITHDRAW
+  REWARD_CLAIM
+  INSTITUTION_REGISTER
+}
+
+// Statut de transaction
+enum TransactionStatus {
+  PENDING
+  CONFIRMED
+  FAILED
+  REVERTED
+}
+
+// Métriques système pour monitoring
+model SystemMetric {
+  id        String   @id @default(cuid())
+  metric    String   // Nom de la métrique
+  value     Decimal  @db.Decimal(78, 18)
+  timestamp DateTime @default(now())
+  
+  @@index([metric, timestamp])
+  @@map("system_metrics")
+}
+
+// Cache pour les données fréquemment accédées
+model CacheEntry {
+  key       String   @id
+  value     Json
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+  
+  @@index([expiresAt])
+  @@map("cache_entries")
+}
+
+// Alertes système
+model Alert {
+  id          String    @id @default(cuid())
+  type        AlertType
+  severity    AlertSeverity
+  title       String
+  message     String
+  resolved    Boolean   @default(false)
+  resolvedAt  DateTime?
+  
+  // Métadonnées
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  
+  @@index([type, severity, resolved])
+  @@map("alerts")
+}
+
+enum AlertType {
+  GAS_BUDGET_WARNING
+  SYSTEM_HEALTH
+  SECURITY_INCIDENT
+  PERFORMANCE_DEGRADATION
+  CONTRACT_ERROR
+}
+
+enum AlertSeverity {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+// Configuration système
+model Config {
+  key       String   @id
+  value     Json
+  updatedAt DateTime @updatedAt
+  
+  @@map("config")
+}
